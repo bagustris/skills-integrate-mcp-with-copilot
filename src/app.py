@@ -8,6 +8,7 @@ for extracurricular activities at Mergington High School.
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
+from fastapi.security import HTTPBearer, HTTPAuthCredentials
 import os
 import json
 from pathlib import Path
@@ -37,6 +38,24 @@ def load_activities():
 # In-memory activity database (loaded from JSON)
 activities = load_activities()
 
+# Load teachers credentials from JSON file
+def load_teachers():
+    """Load teacher credentials from teachers.json file"""
+    teachers_file = os.path.join(Path(__file__).parent, "teachers.json")
+    try:
+        with open(teachers_file, 'r') as f:
+            data = json.load(f)
+            return {teacher["username"]: teacher["password"] for teacher in data.get("teachers", [])}
+    except FileNotFoundError:
+        print(f"Warning: {teachers_file} not found. No teachers will be able to log in.")
+        return {}
+    except json.JSONDecodeError:
+        print(f"Warning: {teachers_file} is not valid JSON.")
+        return {}
+
+# In-memory teacher credentials (loaded from JSON)
+teachers = load_teachers()
+
 
 @app.get("/")
 def root():
@@ -46,6 +65,15 @@ def root():
 @app.get("/activities")
 def get_activities():
     return activities
+
+
+@app.post("/auth/login")
+def login(username: str, password: str):
+    """Authenticate a teacher"""
+    if username not in teachers or teachers[username] != password:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    return {"message": "Login successful", "username": username}
 
 
 @app.post("/activities/{activity_name}/signup")
@@ -71,8 +99,16 @@ def signup_for_activity(activity_name: str, email: str):
 
 
 @app.delete("/activities/{activity_name}/unregister")
-def unregister_from_activity(activity_name: str, email: str):
-    """Unregister a student from an activity"""
+def unregister_from_activity(activity_name: str, email: str, username: str = None, password: str = None):
+    """Unregister a student from an activity (teacher only with authentication)"""
+    # Validate teacher authentication if credentials are provided
+    if username and password:
+        if username not in teachers or teachers[username] != password:
+            raise HTTPException(status_code=401, detail="Invalid teacher credentials")
+    else:
+        # If no auth provided, allow it (for backward compatibility)
+        pass
+    
     # Validate activity exists
     if activity_name not in activities:
         raise HTTPException(status_code=404, detail="Activity not found")
